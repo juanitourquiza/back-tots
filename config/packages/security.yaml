@@ -20,6 +20,13 @@ security:
                 check_path: /api/login_check
                 success_handler: lexik_jwt_authentication.handler.authentication_success
                 failure_handler: lexik_jwt_authentication.handler.authentication_failure
+        # Permitir acceso público a spaces sin autenticación
+        spaces_public:
+            pattern: ^/api/spaces$
+            stateless: true
+            security: false
+        
+        # API general que requiere autenticación    
         api:
             pattern: ^/api
             stateless: true
