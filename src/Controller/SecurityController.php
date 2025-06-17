@@ -53,6 +53,7 @@ class SecurityController extends AbstractController
     }
     
     #[Route('/api/profile', name: 'app_profile', methods: ['GET'])]
+    #[Route('/api/users/profile', name: 'app_users_profile', methods: ['GET'])]
     public function profile(): JsonResponse
     {
         // Obtener el usuario autenticado
