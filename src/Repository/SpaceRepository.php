@@ -73,4 +73,29 @@ class SpaceRepository extends ServiceEntityRepository
         
         return $count == 0;
     }
+    
+    /**
+     * Check if a space is available on a specific date and time, excluding the given reservation
+     * This is useful for updating a reservation without it conflicting with itself
+     */
+    public function isAvailableExcludingReservation(int $spaceId, \DateTimeInterface $startTime, \DateTimeInterface $endTime, int $excludeReservationId): bool
+    {
+        $count = $this->createQueryBuilder('s')
+            ->select('COUNT(r.id)')
+            ->join('s.reservations', 'r')
+            ->andWhere('s.id = :spaceId')
+            ->andWhere('r.id != :excludeId')
+            ->andWhere('r.status != :canceledStatus')
+            ->andWhere('r.endTime > :startTime')
+            ->andWhere('r.startTime < :endTime')
+            ->setParameter('spaceId', $spaceId)
+            ->setParameter('excludeId', $excludeReservationId)
+            ->setParameter('canceledStatus', 'canceled')
+            ->setParameter('startTime', $startTime)
+            ->setParameter('endTime', $endTime)
+            ->getQuery()
+            ->getSingleScalarResult();
+        
+        return $count == 0;
+    }
 }

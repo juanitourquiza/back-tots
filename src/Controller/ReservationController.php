@@ -165,26 +165,127 @@ class ReservationController extends AbstractController
         }
         
         $data = json_decode($request->getContent(), true);
+        $updated = false;
+        
+        // Debug: guardar datos recibidos y estado de la reserva
+        $debug = [
+            'reservationId' => $id,
+            'requestData' => $data,
+            'currentStatus' => $reservation->getStatus(),
+            'isPending' => $reservation->getStatus() === 'pending',
+            'isFutureReservation' => $reservation->getStartTime() > new \DateTime(),
+            'reservationStartTime' => $reservation->getStartTime()->format('Y-m-d H:i:s'),
+            'currentTime' => (new \DateTime())->format('Y-m-d H:i:s')
+        ];
         
         // Los administradores pueden cambiar el estado
         if ($this->isGranted('ROLE_ADMIN') && isset($data['status'])) {
             $reservation->setStatus($data['status']);
-            $reservation->setUpdatedAt(new \DateTime());
+            $updated = true;
         }
         
-        // Solo permitir actualizar notas para el dueño (y en estado pendiente)
-        if ($reservation->getUser() === $this->getUser() && $reservation->getStatus() === 'pending') {
+        // Permitir actualizaciones independientemente del estado
+        // Eliminamos la restricción de solo estado pendiente
+        {
+            // Actualizar notas
             if (isset($data['notes'])) {
                 $reservation->setNotes($data['notes']);
-                $reservation->setUpdatedAt(new \DateTime());
+                $updated = true;
             }
             
-            // Si se quiere cambiar fechas u otros datos importantes, mejor cancelar y crear nueva
+            // Actualizar número de asistentes
+            if (isset($data['attendees'])) {
+                $attendees = (int)$data['attendees'];
+                
+                // Verificar que no exceda la capacidad del espacio
+                $space = $reservation->getSpace();
+                if ($attendees > $space->getCapacity()) {
+                    return $this->json([
+                        'message' => 'El número de asistentes excede la capacidad del espacio',
+                        'capacity' => $space->getCapacity()
+                    ], Response::HTTP_BAD_REQUEST);
+                }
+                
+                $reservation->setAttendees($attendees);
+                $updated = true;
+            }
+            
+            // Permitir actualizar fechas y espacio independientemente de si es una reserva próxima
+            // Solo requerimos que el usuario sea dueño o admin
+            if ($reservation->getUser() === $this->getUser() || $this->isGranted('ROLE_ADMIN')) {
+                
+                $startTime = isset($data['startTime']) ? new \DateTime($data['startTime']) : null;
+                $endTime = isset($data['endTime']) ? new \DateTime($data['endTime']) : null;
+                
+                // Actualizar espacio
+                if (isset($data['spaceId'])) {
+                    $space = $this->spaceRepository->find($data['spaceId']);
+                    
+                    if (!$space) {
+                        return $this->json(['message' => 'Espacio no encontrado'], Response::HTTP_NOT_FOUND);
+                    }
+                    
+                    if (!$space->isIsActive()) {
+                        return $this->json(['message' => 'El espacio no está disponible para reservas'], Response::HTTP_BAD_REQUEST);
+                    }
+                    
+                    $reservation->setSpace($space);
+                    $updated = true;
+                }
+                
+                // Actualizar fechas
+                if ($startTime && $endTime) {
+                    // Verificar que la fecha de inicio sea anterior a la fecha de fin
+                    if ($startTime >= $endTime) {
+                        return $this->json(['message' => 'La hora de inicio debe ser anterior a la hora de fin'], Response::HTTP_BAD_REQUEST);
+                    }
+                    
+                    // Verificar que la fecha de inicio sea futura
+                    if ($startTime <= new \DateTime()) {
+                        return $this->json(['message' => 'La reserva debe ser para una fecha futura'], Response::HTTP_BAD_REQUEST);
+                    }
+                    
+                    // Verificar disponibilidad, excluyendo la propia reserva
+                    $isAvailable = $this->spaceRepository->isAvailableExcludingReservation(
+                        $reservation->getSpace()->getId(),
+                        $startTime, 
+                        $endTime,
+                        $reservation->getId()
+                    );
+                    
+                    if (!$isAvailable) {
+                        return $this->json(['message' => 'El espacio no está disponible en el horario seleccionado'], Response::HTTP_CONFLICT);
+                    }
+                    
+                    $reservation->setStartTime($startTime);
+                    $reservation->setEndTime($endTime);
+                    
+                    // Recalcular precio si cambiaron las fechas
+                    $hours = ($endTime->getTimestamp() - $startTime->getTimestamp()) / 3600;
+                    $totalPrice = $reservation->getSpace()->getPrice() * $hours;
+                    $reservation->setTotalPrice($totalPrice);
+                    
+                    $updated = true;
+                }
+            }
         }
         
-        $this->entityManager->flush();
+        // Al final del método, incluir la información de debug
+        if ($updated) {
+            $reservation->setUpdatedAt(new \DateTime());
+            $this->entityManager->flush();
+            return $this->json([
+                'message' => 'Reserva actualizada correctamente',
+                'reservation' => $reservation,
+                'debug' => $debug
+            ], Response::HTTP_OK, [], ['groups' => 'reservation:read']);
+        }
         
-        return $this->json($reservation, Response::HTTP_OK, [], ['groups' => 'reservation:read']);
+        return $this->json([
+            'message' => 'No se realizaron cambios en la reserva',
+            'reservation' => $reservation,
+            'debug' => $debug
+        ], Response::HTTP_OK, [], ['groups' => 'reservation:read']);
     }
 
     #[Route('/{id}/cancel', name: 'reservation_cancel', methods: ['PUT'])]
