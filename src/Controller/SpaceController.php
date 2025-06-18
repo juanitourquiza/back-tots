@@ -32,12 +32,20 @@ class SpaceController extends AbstractController
     #[Route('', name: 'space_list', methods: ['GET'])]
     public function list(): JsonResponse
     {
-        // Solo mostrar espacios activos para usuarios normales
-        if ($this->isGranted('ROLE_ADMIN')) {
-            $spaces = $this->spaceRepository->findAll();
-        } else {
-            $spaces = $this->spaceRepository->findActiveSpaces();
-        }
+        // Para usuarios normales, solo mostrar espacios activos
+        $spaces = $this->spaceRepository->findActiveSpaces();
+        
+        return $this->json($spaces, Response::HTTP_OK, [], ['groups' => 'space:read']);
+    }
+    
+    #[Route('/admin', name: 'space_list_admin', methods: ['GET'])]
+    public function listAdmin(): JsonResponse
+    {
+        // Solo los administradores pueden ver todos los espacios
+        $this->denyAccessUnlessGranted('ROLE_ADMIN');
+        
+        // Mostrar todos los espacios, activos e inactivos
+        $spaces = $this->spaceRepository->findAll();
         
         return $this->json($spaces, Response::HTTP_OK, [], ['groups' => 'space:read']);
     }

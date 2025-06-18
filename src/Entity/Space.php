@@ -39,6 +39,7 @@ class Space
     private ?string $location = null;
 
     #[ORM\Column]
+    #[Groups(['space:read', 'reservation:read'])]
     private ?bool $isActive = true;
 
     #[ORM\Column(nullable: true)]
